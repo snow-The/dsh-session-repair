@@ -1,0 +1,42 @@
+{
+  "name": "@snow-the/dsh-session-repair",
+  "version": "0.1.0",
+  "description": "Scans and repairs DSH session logs: re-encodes single-frame corrupt zstd files back to the multi-frame layout and marks unknown event types (e.g. llm/failover) as ignorable so older harnesses can load newer logs.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "session",
+    "repair",
+    "zstd",
+    "deepseek-harness"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json --emitDeclarationOnly && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --external:@deepseek-ai/* --log-level=warning",
+    "test": "node --test"
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/snow-The/dsh-own-plugins.git",
+    "directory": "dsh-session-repair"
+  },
+  "types": "./dist/index.d.ts",
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,4 @@
+# dsh-session-repair bundle layer: session log scan & repair tools.
+- insert:
+    - id: session-repair
+      name: '@snow-the/dsh-session-repair'
