@@ -64,17 +64,27 @@ const sessionsRoot = () =>
 
 async function listSessionLogs(root: string): Promise<string[]> {
   const out: string[] = []
+  // One session = one directory, and DSH migrates a log to a new generation
+  // (session.v<N>.jsonl.zstd) while keeping the older file beside it. Repair must
+  // target the generation the harness actually READS - fixing a stale v0 log while
+  // v3 is live is a silent no-op that reports success.
+  const best = new Map<string, { v: number; path: string }>()
   const walk = async (dir: string) => {
     let ents
     try { ents = await readdir(dir, { withFileTypes: true }) } catch { return }
     for (const e of ents) {
       if (e.name.startsWith('.')) continue
       const p = join(dir, e.name)
-      if (e.isDirectory()) await walk(p)
-      else if (e.name === 'session.jsonl.zstd') out.push(p)
+      if (e.isDirectory()) { await walk(p); continue }
+      const m = /^session(?:\.v(\d+))?\.jsonl\.zstd$/.exec(e.name)
+      if (m === null) continue
+      const v = m[1] === undefined ? 0 : Number(m[1])
+      const prev = best.get(dir)
+      if (prev === undefined || v > prev.v) best.set(dir, { v, path: p })
     }
   }
   await walk(root)
+  for (const entry of best.values()) out.push(entry.path)
   return out
 }
 

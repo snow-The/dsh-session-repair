@@ -52,6 +52,7 @@ var KNOWN_TYPES = /* @__PURE__ */ new Set([
 var sessionsRoot = () => process.env.DSH_HOME ? join(process.env.DSH_HOME, "sessions") : join(homedir(), ".dsh", "sessions");
 async function listSessionLogs(root) {
   const out = [];
+  const best = /* @__PURE__ */ new Map();
   const walk = async (dir) => {
     let ents;
     try {
@@ -62,11 +63,19 @@ async function listSessionLogs(root) {
     for (const e of ents) {
       if (e.name.startsWith(".")) continue;
       const p = join(dir, e.name);
-      if (e.isDirectory()) await walk(p);
-      else if (e.name === "session.jsonl.zstd") out.push(p);
+      if (e.isDirectory()) {
+        await walk(p);
+        continue;
+      }
+      const m = /^session(?:\.v(\d+))?\.jsonl\.zstd$/.exec(e.name);
+      if (m === null) continue;
+      const v = m[1] === void 0 ? 0 : Number(m[1]);
+      const prev = best.get(dir);
+      if (prev === void 0 || v > prev.v) best.set(dir, { v, path: p });
     }
   };
   await walk(root);
+  for (const entry of best.values()) out.push(entry.path);
   return out;
 }
 async function zstdFrames(p) {
