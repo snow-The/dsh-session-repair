@@ -1,21 +1,29 @@
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import * as m from './index.js'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+// The plugin's entry is the built bundle (package.json main). Importing './index.js'
+// from test/ pointed at a file that never existed, so this test could not load at all.
+import * as m from '../dist/index.js'
 
 const registered = []
 m.apply({ tools: { register: (t) => registered.push(t) } })
 const scan = registered.find((t) => t.name === 'session_repair_scan')
 const fix = registered.find((t) => t.name === 'session_repair_fix')
 
-const base = '/tmp/srtest/sessions'
+// Platform-neutral scratch space: the old hardcoded /tmp path resolved to C:\tmp on
+// Windows and needed the drive root to be writable.
+const base = join(tmpdir(), 'srtest', 'sessions')
 mkdirSync(base, { recursive: true })
 const d1 = base + '/--home-x--/session-abc'
 mkdirSync(d1, { recursive: true })
 const header = JSON.stringify({ type: 'session', version: 0, id: 'session-abc', createdAt: 1, cwd: '/x' })
 const ev = JSON.stringify({ type: 'llm/failover', seq: 1, data: { from: 'a', to: 'b' } })
 const raw = [header, ev, JSON.stringify({ type: 'message', seq: 2 })].join('\n') + '\n'
-writeFileSync('/tmp/srtest/raw.txt', raw)
-execFileSync('zstd', ['-c', '-q', '/tmp/srtest/raw.txt', '-o', d1 + '/session.jsonl.zstd'])
+const rawFile = join(tmpdir(), 'srtest', 'raw.txt')
+mkdirSync(join(tmpdir(), 'srtest'), { recursive: true })
+writeFileSync(rawFile, raw)
+execFileSync('zstd', ['-c', '-q', rawFile, '-o', d1 + '/session.jsonl.zstd'])
 
 const d2 = base + '/--home-x--/session-def'
 mkdirSync(d2, { recursive: true })
