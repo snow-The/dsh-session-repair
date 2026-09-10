@@ -222,7 +222,9 @@ function apply(ctx) {
       required: []
     },
     output: {
-      schema: { type: "object" },
+      // The host validates tool schemas at register() and aborts the WHOLE plugin tree when
+      // one is invalid: an object schema must state additionalProperties explicitly.
+      schema: { type: "object", additionalProperties: true },
       render: renderText
     },
     timeoutMs: 12e4,
@@ -252,7 +254,9 @@ function apply(ctx) {
       required: []
     },
     output: {
-      schema: { type: "object" },
+      // The host validates tool schemas at register() and aborts the WHOLE plugin tree when
+      // one is invalid: an object schema must state additionalProperties explicitly.
+      schema: { type: "object", additionalProperties: true },
       render: renderText
     },
     timeoutMs: 3e5,
