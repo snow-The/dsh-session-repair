@@ -87,12 +87,25 @@ async function zstdFrames(p) {
     return null;
   }
 }
+function classifyDecodeFailure(err) {
+  const e = err;
+  if (e?.code === "ENOENT") return "no-zstd-cli";
+  const text = String(e?.stderr ?? "") + " " + String(e?.message ?? "");
+  if (/allocation error|not enough memory|ZSTD_error_memory_allocation/i.test(text)) return "out-of-memory";
+  if (/not a zstandard|unsupported|corrupt|unknown frame|premature|unsupported frame/i.test(text)) return "format";
+  return "unknown";
+}
 async function zstdDecompress(p) {
   try {
     const { stdout } = await execFileP("zstd", ["-d", "-c", "-q", p], { maxBuffer: 512 << 20 });
-    return stdout;
-  } catch {
-    return null;
+    return { text: stdout, failure: null, detail: "" };
+  } catch (err) {
+    const e = err;
+    return {
+      text: null,
+      failure: classifyDecodeFailure(err),
+      detail: String(e?.stderr ?? e?.message ?? "").replace(/\s+/g, " ").trim().slice(0, 200)
+    };
   }
 }
 function zstdFrame(line) {
@@ -127,15 +140,22 @@ async function inspect(p) {
     lines: 0,
     headerOk: false,
     issues: [],
+    advisories: [],
+    problem: false,
     unknownEvents: [],
     parseErrors: []
   };
   res.frames = await zstdFrames(p);
-  const text = await zstdDecompress(p);
-  if (text === null) {
-    res.issues.push("UNDECODABLE");
+  const dec = await zstdDecompress(p);
+  if (dec.text === null) {
+    res.decodeFailure = dec.failure;
+    res.decodeDetail = dec.detail;
+    res.issues.push(dec.failure === "out-of-memory" ? "DECODE_OUT_OF_MEMORY" : dec.failure === "no-zstd-cli" ? "ZSTD_CLI_MISSING" : "UNDECODABLE");
+    res.advisories.push(dec.failure === "out-of-memory" ? "decoder ran out of memory (ZSTD_error_memory_allocation) \u2014 retry later or free memory; the file itself is fine" : dec.failure === "no-zstd-cli" ? "the zstd CLI is not on PATH \u2014 install it to inspect, not to repair" : "decoder rejected the stream \u2014 verify with an independent decoder before treating this as corruption");
+    res.problem = dec.failure === "format";
     return res;
   }
+  const text = dec.text;
   const lines = text.split("\n").filter((l) => l.trim().length > 0);
   res.lines = lines.length;
   if (lines.length === 0) {
@@ -157,7 +177,10 @@ async function inspect(p) {
     }
   });
   if (res.parseErrors.length) res.issues.push("PARSE_ERRORS");
-  if (res.unknownEvents.length) res.issues.push("UNKNOWN_EVENTS");
+  if (res.unknownEvents.length) {
+    res.advisories.push(res.unknownEvents.length + " event type(s) newer than this scanner's vocabulary; harmless, no repair needed");
+  }
+  res.problem = res.issues.length > 0;
   const m = lines[0].match(/"id"\s*:\s*"([^"]+)"/);
   if (m) res.sessionId = m[1];
   return res;
@@ -182,9 +205,11 @@ async function rebuildFrames(p, lines) {
 }
 async function repair(p, extraKnown) {
   const known = /* @__PURE__ */ new Set([...KNOWN_TYPES, ...extraKnown]);
-  const text = await zstdDecompress(p);
-  if (text === null) throw new Error("undecodable: " + p);
-  const lines = text.split("\n").filter((l) => l.trim().length > 0);
+  const dec = await zstdDecompress(p);
+  if (dec.text === null) {
+    throw new Error("refusing to rewrite " + p + ': decoder failure is "' + dec.failure + '" (' + (dec.detail || "no detail") + "), which is not corruption. Free memory / install the zstd CLI and rescan.");
+  }
+  const lines = dec.text.split("\n").filter((l) => l.trim().length > 0);
   let marked = 0;
   const fixed = lines.map((l) => {
     const info = parseLine(l);
@@ -213,7 +238,7 @@ function renderText(value) {
 function apply(ctx) {
   ctx.tools.register({
     name: "session_repair_scan",
-    description: "Scan DSH session logs (~/.dsh/sessions) for corruption and unknown-event problems. Read-only: reports frames vs lines, bad headers, unparseable lines, and unknown event types missing the ignorable flag. Use session_repair_fix to repair.",
+    description: "Scan DSH session logs (~/.dsh/sessions) for real corruption. Read-only. Splits findings into problems (bad header, single-frame layout, unparseable lines, decoder failure classified as FORMAT) and advisories (newer event vocabulary, out-of-memory or missing-decoder failures) \u2014 advisories need NO action. Only repair when problems > 0.",
     parameters: {
       type: "object",
       properties: {
@@ -234,12 +259,20 @@ function apply(ctx) {
       const files = await listSessionLogs(dir);
       const results = [];
       for (const f of files) results.push(await inspect(f));
-      return JSON.parse(JSON.stringify({ sessionsDir: dir, scanned: files.length, files: results }));
+      const problems = results.filter((r) => r.problem);
+      return JSON.parse(JSON.stringify({
+        sessionsDir: dir,
+        scanned: files.length,
+        // Only `problems` need action. `advisories` (newer event vocabulary) are informational.
+        problems: problems.length,
+        advisories: results.filter((r) => !r.problem && r.advisories.length).length,
+        files: results
+      }));
     }
   });
   ctx.tools.register({
     name: "session_repair_fix",
-    description: "Repair DSH session logs: rebuild single-frame corrupt files into the multi-frame one-line-per-frame layout and mark unknown event types as ignorable. Every touched file is backed up as <file>.bak-repair-<timestamp>. Restart the harness afterwards so it reloads the sessions.",
+    description: "Repair DSH session logs: rebuild single-frame corrupt files into the multi-frame one-line-per-frame layout and mark unknown event types as ignorable. Refuses files whose decoder failure was a resource problem (never treats OOM as corruption). Every touched file is backed up as <file>.bak-repair-<timestamp>. Restart the harness afterwards so it reloads the sessions.",
     parameters: {
       type: "object",
       properties: {
@@ -289,6 +322,7 @@ function apply(ctx) {
 }
 export {
   apply,
+  classifyDecodeFailure,
   inject,
   name
 };
