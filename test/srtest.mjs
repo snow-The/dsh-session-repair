@@ -39,7 +39,7 @@ console.log('SCAN:'); console.log(JSON.stringify(scanRep, null, 1))
 const fixRep = await fix.execute({ sessionsDir: base }, {})
 console.log('FIX:'); console.log(JSON.stringify(fixRep, null, 1))
 
-const scanRep2 = await scan.execute({ sessionsDir: base }, {})
+const scanRep2 = await scan.execute({ sessionsDir: base, verbose: true }, {})
 console.log('RESCAN:', JSON.stringify(scanRep2.files.map((f) => [f.path.split('/').pop(), f.issues])))
 
 const first = execFileSync('zstd', ['-d', '-c', '-q', d1 + '/session.jsonl.zstd'], { encoding: 'utf-8' })

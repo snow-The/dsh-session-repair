@@ -287,11 +287,13 @@ export function apply(ctx: Ctx) {
       'Scan DSH session logs (~/.dsh/sessions) for real corruption. Read-only. ' +
       'Splits findings into problems (bad header, single-frame layout, unparseable lines, decoder ' +
       'failure classified as FORMAT) and advisories (newer event vocabulary, out-of-memory or ' +
-      'missing-decoder failures) — advisories need NO action. Only repair when problems > 0.',
+      'missing-decoder failures) — advisories need NO action. Only repair when problems > 0. ' +
+      'Returns a compact summary by default; pass verbose:true for the per-file detail.',
     parameters: {
       type: 'object',
       properties: {
         sessionsDir: { type: 'string', description: 'Override the sessions directory (default ~/.dsh/sessions)' },
+        verbose: { type: 'boolean', description: 'Full per-file report (large). Default is a compact summary.' },
       },
       required: [],
     },
@@ -309,14 +311,32 @@ export function apply(ctx: Ctx) {
       const results = []
       for (const f of files) results.push(await inspect(f))
       const problems = results.filter((r) => r.problem)
-      return JSON.parse(JSON.stringify({
+      const withAdvisory = results.filter((r) => !r.problem && r.advisories.length)
+      const base = {
         sessionsDir: dir,
         scanned: files.length,
-        // Only `problems` need action. `advisories` (newer event vocabulary) are informational.
+        // Only `problems` need action. `advisories` (newer event vocabulary, resource failures) are informational.
         problems: problems.length,
-        advisories: results.filter((r) => !r.problem && r.advisories.length).length,
-        files: results,
-      }))
+        advisories: withAdvisory.length,
+      }
+      // Compact by default: the full report is ~5k tokens per inspected file — a single call
+      // to this tool has measured 736k tokens, which can swallow a whole context window. The
+      // agent only needs the counts plus enough evidence to decide what to do next.
+      if ((args as { verbose?: boolean }).verbose !== true) {
+        const histogram: Record<string, number> = {}
+        const advisories: Record<string, number> = {}
+        for (const r of results) for (const i of r.issues) histogram[i] = (histogram[i] ?? 0) + 1
+        for (const r of withAdvisory) for (const a of r.advisories) advisories[a] = (advisories[a] ?? 0) + 1
+        return JSON.parse(JSON.stringify({
+          ...base,
+          issueHistogram: histogram,
+          advisoryKinds: advisories,
+          problemFiles: problems.slice(0, 10).map((r) => ({ path: r.path, issues: r.issues })),
+          truncatedProblems: Math.max(0, problems.length - 10),
+          hint: 'compact summary; pass verbose:true only when you need the per-file detail',
+        }))
+      }
+      return JSON.parse(JSON.stringify({ ...base, files: results }))
     },
   })
   ctx.tools.register({
