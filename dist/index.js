@@ -104,7 +104,7 @@ async function zstdDecompress(p) {
     return {
       text: null,
       failure: classifyDecodeFailure(err),
-      detail: String(e?.stderr ?? e?.message ?? "").replace(/\s+/g, " ").trim().slice(0, 200)
+      detail: String(e?.stderr ?? e?.message ?? "").replace(/\s+/g, " ").trim().slice(0, 200).toWellFormed()
     };
   }
 }
